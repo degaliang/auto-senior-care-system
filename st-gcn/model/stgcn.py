@@ -140,7 +140,8 @@ class stgcn_unit(nn.Module):
         if in_channels != out_channels or stride != 1:
             self.transform = nn.Sequential(
                 nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=1),
-                nn.BatchNorm2d(out_channels)
+                nn.BatchNorm2d(out_channels),
+                nn.LayerNorm((out_channels, height, width))
             )
             
             # alternatively, this is what the original paper does
@@ -154,9 +155,9 @@ class stgcn_unit(nn.Module):
         else:
             xt = x
         
-        y = self.sgcn(x)
+        z = y = self.sgcn(x)
         y = self.tgcn(y)
         y = self.dropout(y)
-        y = y + xt
+        y = y + xt + z  #skip connection after the sgcn layer and the transformed input
         
         return y
