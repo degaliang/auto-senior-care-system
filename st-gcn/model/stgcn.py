@@ -4,11 +4,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-import sgcn as sgcn
-import tgcn as tgcn
+from sgcn import unit_sgcn
+from tgcn import unit_tgcn
 
 default_layer_config = [(64, 64, 1), (64, 64, 1), (64, 64, 1), (64, 128, 2), (128, 128, 1),
-                        (128, 128, 1), (128, 256, 2), (256, 256, 1), (256, 256, 1)]
+                        (128, 128, 1), (128, 256, 2), (256, 256, 1), (256, 256, 1)] # (in_channles, out_channels, temporal_stride)
 
 class stgcn(nn.Module):
     def __init__(self, 
@@ -50,7 +50,9 @@ class stgcn(nn.Module):
             # Graph = import_class(graph)
             # self.graph = Graph(**graph_args)
             # self.A = torch.from_numpy(self.graph.A).float()
-            self.A = None
+            self.A = torch.tensor(graph, dtype=torch.float32, requires_grad=False)
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            self.A = self.A.to(device)
         
         self.in_channels = in_channels
         self.num_class = num_class
@@ -63,8 +65,8 @@ class stgcn(nn.Module):
         
         # input layer
         self.stgcn_in = nn.Sequential(
-            sgcn(self.A, in_channels, layer_config[0][0], non_linearity=non_linearity, learnable_mask=learnable_mask),
-            tgcn(layer_config[0][0], layer_config[0][0], kernel_size=temporal_kernel_size, non_linearity=non_linearity)
+            unit_sgcn(self.A, in_channels, layer_config[0][0], non_linearity=non_linearity, learnable_mask=learnable_mask),
+            unit_tgcn(layer_config[0][0], layer_config[0][0], kernel_size=temporal_kernel_size, non_linearity=non_linearity)
         )
         
         # internal layers
@@ -76,37 +78,42 @@ class stgcn(nn.Module):
         
         # output layer
         self.fcn = nn.Conv1d(layer_config[-1][1], num_class, kernel_size=1)
-        nn.init.kaiming_normal_(self.fcn, mode='fan_in', nonlinearity='relu')
+        nn.init.kaiming_normal_(self.fcn.weight, mode='fan_in', nonlinearity='relu')
     
     def forward(self, x):
-        N, C, T, V, M = x.shape
+        # batch_size, in_channels, frame, vertex, num_people
+        # N, C, T, V, M = x.shape
+        
+        N, C, T, V = x.shape
         
         # from (N, C, T, V, M) to (N*M, C, T, V)
-        x = x.permute(0, 4, 1, 2, 3).contiguous().view(N * M, C, T, V)
+        # x = x.permute(0, 4, 1, 2, 3).contiguous().view(N * M, C, T, V)
         
-        x = self.stgcn_in(x)
-        
+        x = self.stgcn_in(x) 
+
         for layer in self.layers:
-            x = layer(x)
+            x = layer(x) # (N, C, T, V)
         
         # V pooling
-        # from (N, C, T, V, M) to (N*M, C, T, 1)
-        x = F.avg_pool2d(x, kernel_size=(1, V))
-
+        # from (N, C, T, V) to (N, C, T)
+        x = torch.mean(x, dim=2)
+        
         # M pooling
-        # from (N*M, C, T, 1) to (N, C, T)
-        x = x.view(N, M, x.shape[1], x.shape[2]) # (N, M, C, T)
-        x = x.mean(dim=1) # (N, C, T)
+        # from (N*M, C, T) to (N, C, T)
+        # x = x.view(N, M, x.shape[1], x.shape[2])
+        # x = x.mean(dim=1)
 
         # T pooling
         # from (N, C, T) to (N, C, 1)
-        x = F.avg_pool1d(x, kernel_size=x.shape[2])
+        # this is a global pooling so that the network can handle different T
+        x = torch.mean(x, dim=2, keepdim=True)
 
         # compute logits
         # from (N, C, 1) to (N, num_class)
         x = self.fcn(x)
         x = F.avg_pool1d(x, x.shape[2:])
         x = x.view(N, self.num_class)
+        x = F.softmax(x, dim=1)
 
         return x
 
@@ -129,8 +136,8 @@ class stgcn_unit(nn.Module):
         """
         super(stgcn_unit, self).__init__()
         
-        self.sgcn = sgcn(A, in_channels, out_channels, stride=stride, non_linearity=non_linearity, learnable_mask=learnable_mask)
-        self.tgcn = tgcn(out_channels, out_channels, kernel_size=temporal_kernel_size, stride=stride, non_linearity=non_linearity)
+        self.sgcn = unit_sgcn(A, in_channels, out_channels, non_linearity=non_linearity, learnable_mask=learnable_mask) # by default use stride = 1
+        self.tgcn = unit_tgcn(out_channels, out_channels, kernel_size=temporal_kernel_size, stride=stride, non_linearity=non_linearity)
         
         self.dropout = nn.Dropout(dropout)
         
@@ -139,7 +146,7 @@ class stgcn_unit(nn.Module):
         # TODO: check for ways to do skip connection and whether apply layer/batch norm
         if in_channels != out_channels or stride != 1:
             self.transform = nn.Sequential(
-                nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=1),
+                nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=(stride, 1)),
                 nn.BatchNorm2d(out_channels)
             )
             
@@ -157,6 +164,7 @@ class stgcn_unit(nn.Module):
         y = self.sgcn(x)
         y = self.tgcn(y)
         y = self.dropout(y)
+
         y = y + xt
         
         return y

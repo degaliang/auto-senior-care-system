@@ -8,7 +8,7 @@ def symnorm(A):
     adjacency matrix
 
     Args:
-        A : adjacency matrix with self-loop
+        A : adjacency matrix
 
     Returns:
         A_symnorm: symnormed A
@@ -24,6 +24,12 @@ def get_adjacency(edges, num_node):
         A[j, i] = 1
     return A
 
+def get_distance_adjacency(edges, num_node):
+    I = np.identity(num_node)
+    N = get_adjacency(edges, num_node)
+    A = np.stack([I, symnorm(N)])
+    return A
+
 if __name__ == '__main__':
     # Test input
     num_nodes = 5
@@ -33,3 +39,5 @@ if __name__ == '__main__':
     print(A)
     print(symnorm(A))
     print(np.sum(symnorm(A), axis=1))
+    
+    print(get_distance_adjacency(edges, num_nodes))

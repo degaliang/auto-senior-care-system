@@ -26,7 +26,7 @@ class unit_tgcn(nn.Module):
         # is unchanged after convolution
         padding = (kernel_size - 1) // 2
         
-        self.conv_net = nn.Conv2d(self.in_channels, self.out_channels, kernel_size=(kernel_size, 1), stride=stride, padding=(padding, 0))
+        self.conv_net = nn.Conv2d(self.in_channels, self.out_channels, kernel_size=(kernel_size, 1), stride=(stride, 1), padding=(padding, 0))
         
         self.bn = nn.BatchNorm2d(self.out_channels)
         

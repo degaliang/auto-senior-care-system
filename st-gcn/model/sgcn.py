@@ -24,7 +24,7 @@ class unit_sgcn(nn.Module):
         self.V = A.shape[-1]
         
         # adjacency matrix
-        self.A = torch.tensor(A, dtype=torch.float32, requires_grad=False).view(-1, self.V, self.V)
+        self.A = A.view(-1, self.V, self.V)
         
         # number of adjacency matrix (number of partitions)
         self.num_A = self.A.shape[0]
@@ -73,7 +73,7 @@ class unit_sgcn(nn.Module):
         for i, Ai in enumerate(A):
             # aggregate info from neighbors
             x_aggregated = torch.matmul(x.view(-1, V), Ai).view(N, C, T, V)
-            
+
             if i == 0:
                 y = self.conv_nets[i](x_aggregated)
             else:
