@@ -72,7 +72,7 @@ class unit_sgcn(nn.Module):
         
         for i, Ai in enumerate(A):
             # aggregate info from neighbors
-            x_aggregated = torch.matmul(x.view(-1, V), Ai).view(N, C, T, V)
+            x_aggregated = torch.matmul(x.reshape(-1, V), Ai).view(N, C, T, V)
 
             if i == 0:
                 y = self.conv_nets[i](x_aggregated)
