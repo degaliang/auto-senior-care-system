@@ -54,8 +54,8 @@ def flows_from_video(path):
 # print(reduced_flows.shape)
 
 # Specify the folder path
-folder_path = "D:\ASH\datasets\Le2i\Home_all\Videos"
-dst_folder = "D:\ASH\datasets\Le2i\Home_all\Flows"
+folder_path = "D:\ASH\datasets\Le2i\Office\Videos"
+dst_folder = "D:\ASH\datasets\Le2i\Office\Flows"
 for filename in tqdm(os.listdir(folder_path)):
     file_path = os.path.join(folder_path, filename)
     if os.path.isfile(file_path):

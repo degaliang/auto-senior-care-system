@@ -1,11 +1,11 @@
 import os
+import re
 import torch
 import argparse
 import numpy as np
 
 from model.stgcn import stgcn, flow_stgcn
 from model.st_graph import get_distance_adjacency
-from numpy.lib.stride_tricks import as_strided
 from tqdm import tqdm
 
 HOME_PATH = "D:\ASH\datasets\Le2i\Home_all\Skeletons_full"
@@ -19,6 +19,8 @@ LEC_ROOM_LABELS = (1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0
 
 default_layer_config = [(64, 64, 1), (64, 64, 1), (64, 64, 1), (64, 128, 2), (128, 128, 1),
                         (128, 128, 1), (128, 256, 2), (256, 256, 1), (256, 256, 1)] # (in_channles, out_channels, temporal_stride)
+layer_config = [(64, 64, 1), (64, 64, 1), (64, 128, 2), (128, 128, 1),
+                (128, 128, 1), (128, 256, 2), (256, 256, 1)]
 
 edges = [
     [0, 1],  # Nose - Left Eye
@@ -42,14 +44,23 @@ edges = [
 max_x = 320
 max_y = 240
 
+def numerical_sort(value):
+    """
+    This helper function finds numbers in a string and returns the string parts and numerical parts.
+    """
+    parts = re.split('(\d+)', value)
+    parts[1::2] = map(int, parts[1::2])  # Convert numerical strings to integers
+    return parts
+
 def load_data(path):
     data = []
-    files = os.listdir(path)
+    files = sorted(os.listdir(path), key=numerical_sort)
     for file in files:
         file_path = os.path.join(path, file)
         if os.path.isfile(file_path):
             seq = np.load(file_path, allow_pickle=True).item()
-            data.append(seq['keypoints'])
+            data.append((seq['filename'], seq['keypoints']))
+
     return data
 
 def create_batch(frames, stride=1, segment_length=45):
@@ -73,13 +84,16 @@ def create_batch(frames, stride=1, segment_length=45):
     
     return batch
 
-def evaluate(model, device, testset='lecture room'):
+def evaluate(model, device, stride=1, testset='lecture room', profile=False):
     model.eval()
     
-    if args.testset == 'home':
+    # 'data' is a list of tuples: (filename, keypoints)
+    if not isinstance(testset, str):
+        data, labels = testset
+    elif testset == 'home':
         data = load_data(HOME_PATH)
         labels = HOME_LABELS
-    elif args.testset == 'office':
+    elif testset == 'office':
         data = load_data(OFFICE_PATH)
         labels = OFFICE_LABELS
     else:
@@ -87,32 +101,48 @@ def evaluate(model, device, testset='lecture room'):
         labels = LEC_ROOM_LABELS
     
     acc = 0
+    fp = []
+    fn = []
+    results = []
     for i in tqdm(range(len(data))):
-        frames = data[i] # (num_frames, 17, 2)
+        filename, frames = data[i] # (num_frames, 17, 2)
         
-        batch = create_batch(frames)
+        batch = create_batch(frames, stride=stride)
         batch = torch.tensor(batch).to(device)
-        
-        # batch = frames[:, :, :2].astype(np.float32)
-        # batch = torch.tensor(batch).unsqueeze(0)
-        # batch[:, :, :, 0] /= max_x
-        # batch[:, :, :, 1] /= max_y
-        # batch = batch.permute(0, 3, 1, 2).to(device)
         
         with torch.no_grad():
             y_pred = model(batch)
-            
             if labels[i] == 1:
                 y_batch = torch.ones(len(batch)).to(device)
+                res = torch.argmax(y_pred, axis=-1)
+                
+                if torch.any(res == y_batch):
+                    pred = 1
+                    acc += 1
+                else:
+                    pred = 0
+                    fn.append(filename)
+                
+                if profile: 
+                    results.append((filename, 1, pred, res.detach().cpu(), y_pred[torch.arange(y_pred.size(0)), res].detach().cpu()))
             else:
                 y_batch = torch.zeros(len(batch)).to(device)
+                res = torch.argmax(y_pred, axis=-1)
                 
-            if torch.any(torch.argmax(y_pred, axis=-1) == y_batch).detach().cpu().item():
-                pred = 1
-            else:
-                pred = 0
-            acc += pred
-    return acc / len(data)
+                if torch.all(res == y_batch):
+                    pred = 0
+                    acc += 1
+                else:
+                    pred = 1
+                    fp.append(filename)
+                
+                if profile: 
+                    results.append((filename, 0, pred, res.detach().cpu(), y_pred[torch.arange(y_pred.size(0)), res].detach().cpu()))
+            
+    print("False positives:", fp)
+    print("False negatives:", fn)
+    print("Accuracy:", acc / len(data))
+    return acc / len(data), results
             
             
 if __name__ == "__main__":
@@ -135,5 +165,5 @@ if __name__ == "__main__":
     model.load_state_dict(torch.load(args.model))
     model.to(device)
     print(f"Evaluating on set: {args.testset}")
-    accuracy = evaluate(model, device, args.testset)
+    accuracy = evaluate(model, device, stride=1, testset=args.testset)
     print(accuracy)
