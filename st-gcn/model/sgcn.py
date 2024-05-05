@@ -6,7 +6,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 class unit_sgcn(nn.Module):
-    def __init__(self, A, in_channels, out_channels, kernel_size=1, stride=1, non_linearity='relu', learnable_mask=False):
+    def __init__(self, A, in_channels, out_channels, kernel_size=1, stride=1, non_linearity='relu', learnable_mask=False, learnable_edges=False):
         """Unit spatial graph convolutional neural network
 
         Args:
@@ -25,6 +25,9 @@ class unit_sgcn(nn.Module):
         
         # adjacency matrix
         self.A = A.view(-1, self.V, self.V)
+        self.learnable_edges = learnable_edges
+        if learnable_edges:
+            self.A = nn.Parameter(A)
         
         # number of adjacency matrix (number of partitions)
         self.num_A = self.A.shape[0]
@@ -47,6 +50,7 @@ class unit_sgcn(nn.Module):
         
         if self.learnable_mask:
             self.mask = nn.Parameter(torch.ones(self.A.shape))
+            self.mask_bias = nn.Parameter(torch.zeros(self.A.shape))
             
         self.bn = nn.BatchNorm2d(self.out_channels)
         
@@ -68,7 +72,7 @@ class unit_sgcn(nn.Module):
         
         # reweight edges in the graph if learnable mask is enabled
         if self.learnable_mask:
-            A = A * self.mask
+            A = A * self.mask + self.mask_bias
         
         for i, Ai in enumerate(A):
             # aggregate info from neighbors

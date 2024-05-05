@@ -2,6 +2,19 @@ import os
 import cv2
 import numpy as np
 
+def clean(dataset, threshold=5, verbose=False):
+    cleaned = []
+    for data in dataset:
+        frame_ids = data['frame_ids']
+        count = 0
+        for i in range(1, len(frame_ids)):
+            count += frame_ids[i] - frame_ids[i - 1] - 1
+        if count > threshold:
+            if verbose: print(data['filename'])
+        else:
+            cleaned.append(data)
+    return np.array(cleaned)
+
 def visualize(data, video_path):
     """Visualize video with AlphaPose bounding box
 
@@ -53,12 +66,13 @@ def visualize(data, video_path):
     cap.release()
     cv2.destroyAllWindows()
 
-def split_fall_seq(filename, seq, start, end, nframes):
+def split_fall_seq(filename, seq, start, end, nframes, shift_window=0):
     # seq.shape == (num_frames, 17, 2)
-    
+    frame_len = nframes + 2 * shift_window
     pivot = start
     
     left = []
+    start_frames_left = []
     for i in range(0, pivot, nframes):
         end_frame = min(pivot, i + nframes, len(seq))
         start_frame = i
@@ -68,13 +82,25 @@ def split_fall_seq(filename, seq, start, end, nframes):
                 offset = 0 - start_frame
                 start_frame += offset
                 end_frame += offset
-        subseq = seq[start_frame:end_frame]
-        if len(subseq) != nframes:
+                
+        adjusted_start_frame = max(start_frame - shift_window, 0)
+        adjusted_end_frame = min(end_frame + shift_window, len(seq))
+        pad_start = start_frame - adjusted_start_frame
+        pad_end = adjusted_end_frame - end_frame
+        if pad_start < shift_window:
+            adjusted_end_frame += shift_window - pad_start
+        elif pad_end < shift_window:
+            adjusted_start_frame -= shift_window - pad_end
+        
+        subseq = seq[adjusted_start_frame:adjusted_end_frame]
+        if len(subseq) != frame_len:
             print(start_frame, end_frame, len(seq), pivot, start, filename)
             print(len(subseq))
         left.append(subseq)
+        start_frames_left.append(start_frame)
     
     right = []
+    start_frames_right = []
     for i in range(pivot + nframes, len(seq), nframes):
         end_frame = min(len(seq), i + nframes)
         start_frame = i
@@ -84,8 +110,19 @@ def split_fall_seq(filename, seq, start, end, nframes):
                 offset = 0 - start_frame
                 start_frame += offset
                 end_frame += offset
-        subseq = seq[start_frame:end_frame]
+                
+        adjusted_start_frame = max(start_frame - shift_window, 0)
+        adjusted_end_frame = min(end_frame + shift_window, len(seq))
+        pad_start = start_frame - adjusted_start_frame
+        pad_end = adjusted_end_frame - end_frame
+        if pad_start < shift_window:
+            adjusted_end_frame += shift_window - pad_start
+        elif pad_end < shift_window:
+            adjusted_start_frame -= shift_window - pad_end
+        
+        subseq = seq[adjusted_start_frame:adjusted_end_frame]
         right.append(subseq)
+        start_frames_right.append(start_frame)
     
     end_frame = min(len(seq), start + nframes)
     start_frame = start
@@ -95,14 +132,26 @@ def split_fall_seq(filename, seq, start, end, nframes):
             offset = 0 - start_frame
             start_frame += offset
             end_frame += offset
-    fall_seq = seq[start_frame:end_frame] # the subseq of the fall event
+    adjusted_start_frame = max(start_frame - shift_window, 0)
+    adjusted_end_frame = min(end_frame + shift_window, len(seq))
+    pad_start = start_frame - adjusted_start_frame
+    pad_end = adjusted_end_frame - end_frame
+    if pad_start < shift_window:
+        adjusted_end_frame += shift_window - pad_start
+    elif pad_end < shift_window:
+        adjusted_start_frame -= shift_window - pad_end
+    
+    fall_seq = seq[adjusted_start_frame:adjusted_end_frame]
+    # fall_seq = seq[start_frame:end_frame] # the subseq of the fall event
     
     non_falls = left + right # a list of subseqs of all the non-fall events
+    start_frames = start_frames_left + start_frames_right # starting frame of each non fall events
     
-    return fall_seq, non_falls
+    return fall_seq, non_falls, start_frames, start_frame
 
-def split_seq(seq, nframes):
+def split_seq(seq, nframes, shift_window=0):
     res = []
+    start_frames = []
     for i in range(0, len(seq), nframes):
         end_frame = min(len(seq), i + nframes)
         start_frame = i
@@ -112,24 +161,39 @@ def split_seq(seq, nframes):
                 offset = 0 - start_frame
                 start_frame += offset
                 end_frame += offset
-        subseq = seq[start_frame:end_frame]
+        adjusted_start_frame = max(start_frame - shift_window, 0)
+        adjusted_end_frame = min(end_frame + shift_window, len(seq))
+        pad_start = start_frame - adjusted_start_frame
+        pad_end = adjusted_end_frame - end_frame
+        if pad_start < shift_window:
+            adjusted_end_frame += shift_window - pad_start
+        elif pad_end < shift_window:
+            adjusted_start_frame -= shift_window - pad_end
+        subseq = seq[adjusted_start_frame:adjusted_end_frame]
         res.append(subseq)
+        start_frames.append(start_frame)
     
-    return res
+    return res, start_frames
 
-def add_flows(flows, subseqs, start_offset, nframes):
+def add_flows(flows, subseqs, start_frames, frame_ids, nframes):
     new_subseqs = []
-    for subseq in subseqs:
-        start = subseq['start_frame'] + start_offset
-        new_subseq = subseq.copy()
-        new_subseq['flows'] = flows[start:start + nframes]
-        if start + nframes - 1 == len(flows):
-            new_subseq['flows'] = np.concatenate((new_subseq['flows'], flows[-1].reshape(1, -1)), axis=0)
-        if len(new_subseq['flows']) == nframes:
-            new_subseqs.append(new_subseq)
+    for i, subseq in enumerate(subseqs):
+        start = start_frames[i]
+        new_subseq = dict()
+        new_subseq['skeletons'] = subseq.copy()
+        new_subseq['flows'] = []
+        
+        for j in range(nframes):
+            if frame_ids[start + j] < len(flows):
+                new_subseq['flows'].append(flows[frame_ids[start + j]])
+            else:
+                new_subseq['flows'].append(flows[-1])
+            
+        new_subseq['flows'] = np.array(new_subseq['flows'])
+        new_subseqs.append(new_subseq)
     return new_subseqs
     
-def split_skeletons(skeletons, nframes=45, flow_path=None):
+def split_skeletons(skeletons, nframes=45, shift_window=0, flow_path=None):
     # skeletons is an array of preprocessed skeleton dicts with keys filename, keypoints, scores, boxes, fall_interval, offset
     res_falls = []
     res_non_falls = []
@@ -141,16 +205,34 @@ def split_skeletons(skeletons, nframes=45, flow_path=None):
         start_frame, end_frame = seq['fall_interval']
         
         if start_frame == 0 and end_frame == 0:
-            non_fall = split_seq(seq['keypoints'], nframes)
+            non_fall, start_frames = split_seq(seq['keypoints'], nframes, shift_window)
         else:
-            fall, non_fall = split_fall_seq(filename, seq['keypoints'], start_frame, end_frame, nframes)
+            fall, non_fall, start_frames, fall_start_frame = split_fall_seq(filename, seq['keypoints'], start_frame, end_frame, nframes, shift_window)
+            res_falls.append(fall)
+            
+        res_non_falls += non_fall
+    
+    return res_falls, res_non_falls
+
+def split_skeletons_and_flows(skeletons, nframes=45):
+    # skeletons is an array of preprocessed skeleton dicts with keys filename, keypoints, scores, boxes, fall_interval, offset
+    res_falls = []
+    res_non_falls = []
+    for seq in skeletons:
+        filename = seq['filename']
+        
+        # start and end frame of the fall event in the skeleton sequence
+        offset = seq['offset']
+        start_frame, end_frame = seq['fall_interval']
+        
+        if start_frame == 0 and end_frame == 0:
+            non_fall, start_frames = split_seq(seq['keypoints'], nframes)
+        else:
+            fall, non_fall, start_frames, fall_start_frame = split_fall_seq(filename, seq['keypoints'], start_frame, end_frame, nframes)
+            fall = add_flows(seq['flows'], [fall], [fall_start_frame], seq['frame_ids'], nframes)[0]
             res_falls.append(fall)
         
-        # if flow_path:
-        #     file_path = os.path.join(flow_path, filename + '.npy')
-        #     flows = np.load(file_path)
-        #     fall = add_flows(flows, [fall], offset, nframes)[0]
-        #     non_fall = add_flows(flows, non_fall, offset, nframes)
+        non_fall = add_flows(seq['flows'], non_fall, start_frames, seq['frame_ids'], nframes)
             
         res_non_falls += non_fall
     

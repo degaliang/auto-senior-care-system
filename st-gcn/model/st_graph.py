@@ -30,6 +30,12 @@ def get_distance_adjacency(edges, num_node):
     A = np.stack([I, symnorm(N)])
     return A
 
+def get_uniform_adjacency(edges, num_node):
+    I = np.identity(num_node)
+    N = get_adjacency(edges, num_node)
+    A = symnorm(I + N)
+    return A[np.newaxis, :, :]
+
 if __name__ == '__main__':
     # Test input
     num_nodes = 5

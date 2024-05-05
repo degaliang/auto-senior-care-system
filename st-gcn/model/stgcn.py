@@ -25,7 +25,8 @@ class stgcn(nn.Module):
                  temporal_kernel_size=9, 
                  dropout=0.5, 
                  non_linearity='relu', 
-                 learnable_mask=False):
+                 learnable_mask=False,
+                 learnable_edges=False):
         """Spatial temporal graph convolutional neural network
 
         Args:
@@ -61,17 +62,18 @@ class stgcn(nn.Module):
         self.graph_config = graph_config
         self.temporal_kernel_size = temporal_kernel_size
         self.learnable_mask = learnable_mask
+        self.learnable_edges = learnable_edges
         
         # input layer
         self.stgcn_in = nn.Sequential(
-            unit_sgcn(self.A, in_channels, layer_config[0][0], non_linearity=non_linearity, learnable_mask=learnable_mask),
+            unit_sgcn(self.A, in_channels, layer_config[0][0], non_linearity=non_linearity, learnable_mask=learnable_mask, learnable_edges=learnable_edges),
             unit_tgcn(layer_config[0][0], layer_config[0][0], kernel_size=temporal_kernel_size, non_linearity=non_linearity)
         )
         
         # internal layers
         self.layers = nn.ModuleList([
             stgcn_unit(self.A, in_channels, out_channels, temporal_kernel_size=temporal_kernel_size, 
-                       stride=stride, dropout=dropout, non_linearity=non_linearity, learnable_mask=learnable_mask)
+                       stride=stride, dropout=dropout, non_linearity=non_linearity, learnable_mask=learnable_mask, learnable_edges=learnable_edges)
             for in_channels, out_channels, stride in layer_config
         ])
         
@@ -230,7 +232,7 @@ class flow_stgcn(nn.Module):
         return x
 
 class stgcn_unit(nn.Module):
-    def __init__(self, A, in_channels, out_channels, temporal_kernel_size=9, stride=1, dropout=0.5, non_linearity='relu', learnable_mask=False):
+    def __init__(self, A, in_channels, out_channels, temporal_kernel_size=9, stride=1, dropout=0.5, non_linearity='relu', learnable_mask=False, learnable_edges=False):
         """a unit layer of spatial temporal neural network. It performs convolution first in spatial and 
         temporal dimension sequentially. The spatial convolution may change the number channels, whereas
         the temporal convolution is assumed to keep the input tensor dimension unchanged. 
@@ -248,7 +250,7 @@ class stgcn_unit(nn.Module):
         """
         super(stgcn_unit, self).__init__()
         
-        self.sgcn = unit_sgcn(A, in_channels, out_channels, non_linearity=non_linearity, learnable_mask=learnable_mask) # by default use stride = 1
+        self.sgcn = unit_sgcn(A, in_channels, out_channels, non_linearity=non_linearity, learnable_mask=learnable_mask, learnable_edges=learnable_edges) # by default use stride = 1
         self.tgcn = unit_tgcn(out_channels, out_channels, kernel_size=temporal_kernel_size, stride=stride, non_linearity=non_linearity)
         
         self.dropout = nn.Dropout(dropout)
