@@ -11,6 +11,5 @@ Our published technical report can be access [here](http://www2.eecs.berkeley.ed
 [Fall Demo 1](https://drive.google.com/file/d/1Y6Pp5SP7Ov-JY93sRAZ-Ubk3l63GM87n/view?usp=sharing)
 [Fall Demo 2](https://drive.google.com/file/d/1RCSb_kTG6HAazxcXAFX4-epmHYXychCC/view?usp=drive_link)
 [Non-Fall Demo 1](https://drive.google.com/file/d/1B_mfuUKPvP4D_CHp4fbD3Y7rVV5q8DWF/view?usp=drive_link)
-[Non-Fall Demo 2](https://drive.google.com/file/d/1AhqyZYStJUhr0uMOSSrzpuHBQqjCBoQh/view?usp=drive_link)
 
 
